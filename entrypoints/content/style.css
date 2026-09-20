@@ -1,0 +1,43 @@
+.jev-hidden {
+  display: none !important;
+}
+
+.jev-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+  vertical-align: middle;
+  color: #d7f7ee;
+  background: #16352e;
+  border: 1px solid #2a6b5c;
+  user-select: none;
+}
+
+.jev-tag-badge[data-jev-tag='spam'],
+.jev-tag-badge[data-jev-tag='promo'],
+.jev-tag-badge[data-jev-tag='crypto'] {
+  color: #ffe8d6;
+  background: #3a2414;
+  border-color: #8a4b1f;
+}
+
+.jev-missing-key {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #f4e6c7;
+  background: #2a2112;
+  border: 1px solid #6b5424;
+}

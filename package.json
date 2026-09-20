@@ -1,0 +1,35 @@
+{
+  "name": "jev-x-tags",
+  "description": "Tag X/Twitter accounts with TypeSafe Jev and hide posts by tag.",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "preview": "vite --config vite.preview.config.ts --host 127.0.0.1 --port 43173",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@wxt-dev/module-react": "^1.1.5",
+    "happy-dom": "^20.0.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.5",
+    "vitest": "^3.2.4",
+    "web-ext": "^10.5.0",
+    "wxt": "^0.21.3"
+  }
+}
