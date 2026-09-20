@@ -229,8 +229,45 @@
   color: var(--danger);
 }
 
-.jev-src.api {
+.jev-src.api,
+.jev-src.blocked {
   color: var(--accent);
+}
+
+.jev-src.block,
+.jev-src.pending,
+.jev-src.blocking {
+  color: var(--warn);
+}
+
+.jev-src.failed {
+  color: var(--danger);
+}
+
+.jev-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.jev-count {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.jev-count.pending {
+  color: var(--warn);
+}
+
+.jev-count.blocked {
+  color: var(--ok);
+}
+
+.jev-count.failed {
+  color: var(--danger);
 }
 
 .jev-log time,

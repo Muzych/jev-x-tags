@@ -1,9 +1,15 @@
-import { VIEWPORT_DEBOUNCE_MS } from '@/lib/defaults';
-import { extractAuthor, findTweetArticles } from '@/lib/extract';
-import { applyHidden, shouldHideByTag } from '@/lib/hide';
-import { tagAccount } from '@/lib/messaging';
-import { settingsItem } from '@/lib/storage';
-import type { Settings, TagResult } from '@/lib/types';
+import { MIN_BLOCK_INTERVAL_MS, VIEWPORT_DEBOUNCE_MS } from '@/lib/defaults';
+import {
+  extractAuthor,
+  extractProfileAccount,
+  findTweetArticles,
+  mergeRecentText,
+  viewerHandle,
+} from '@/lib/extract';
+import { claimBlockJobs, reportBlock, tagAccount } from '@/lib/messaging';
+import { blocksItem, settingsItem } from '@/lib/storage';
+import { blockOnPage } from '@/lib/xblock-page';
+import type { AccountState, BlockRecord, TagResult } from '@/lib/types';
 import './style.css';
 
 export default defineContentScript({
@@ -13,10 +19,13 @@ export default defineContentScript({
   main(ctx) {
     const handleTags = new Map<string, TagResult>();
     const articleMeta = new WeakMap<HTMLElement, { handle: string }>();
+    const recentByHandle = new Map<string, string>();
     const queued = new Set<string>();
     const timers = new Map<string, number>();
-    let hideTags: string[] = [];
+    let blockByHandle = new Map<string, BlockRecord>();
     let bannerShown = false;
+    let draining = false;
+    let selfHandle: string | null = null;
 
     const io = new IntersectionObserver(
       (entries) => {
@@ -30,8 +39,18 @@ export default defineContentScript({
       { root: null, rootMargin: '120px 0px', threshold: 0.05 },
     );
 
+    function blockStatus(handle: string): BlockRecord | undefined {
+      return blockByHandle.get(handle);
+    }
+
     function paint(article: HTMLElement, result: TagResult): void {
-      applyHidden(article, shouldHideByTag(result.tag, hideTags));
+      const record = blockStatus(result.handle);
+      const pending =
+        record?.status === 'pending' || record?.status === 'blocking';
+      article.classList.toggle('jev-block-pending', Boolean(pending));
+      if (pending) article.setAttribute('data-jev-pending', '1');
+      else article.removeAttribute('data-jev-pending');
+
       const userName = article.querySelector('[data-testid="User-Name"]');
       if (!userName) return;
       let badge = article.querySelector<HTMLElement>('.jev-tag-badge');
@@ -41,10 +60,20 @@ export default defineContentScript({
         userName.append(badge);
       }
       badge.dataset.jevTag = result.tag;
-      badge.textContent = result.tag;
-      badge.title = result.cached
-        ? `Jev tag (cached): ${result.tag}`
-        : `Jev tag: ${result.tag}`;
+      const suffix =
+        record?.status === 'blocked'
+          ? ' · blocked'
+          : record?.status === 'failed'
+            ? ' · block failed'
+            : pending
+              ? ' · blocking…'
+              : '';
+      badge.textContent = `${result.tag}${suffix}`;
+      badge.title = record?.error
+        ? `Jev ${result.tag}: ${record.error}`
+        : result.cached
+          ? `Jev tag (cached): ${result.tag}`
+          : `Jev tag: ${result.tag}`;
     }
 
     function repaintAll(): void {
@@ -53,15 +82,14 @@ export default defineContentScript({
         if (!meta) continue;
         const result = handleTags.get(meta.handle);
         if (result) paint(article, result);
-        else applyHidden(article, false);
+        else article.classList.remove('jev-block-pending');
       }
     }
 
     function showMissingKeyBanner(): void {
       if (bannerShown) return;
       bannerShown = true;
-      const primary =
-        document.querySelector('main') ?? document.body;
+      const primary = document.querySelector('main') ?? document.body;
       const bar = document.createElement('div');
       bar.className = 'jev-missing-key';
       bar.textContent =
@@ -69,42 +97,56 @@ export default defineContentScript({
       primary.prepend(bar);
     }
 
+    function rememberRecent(state: AccountState): AccountState {
+      const merged = mergeRecentText(
+        recentByHandle.get(state.handle) ?? '',
+        state.recentText,
+      );
+      recentByHandle.set(state.handle, merged);
+      return { ...state, recentText: merged };
+    }
+
+    function scheduleState(state: AccountState, article?: HTMLElement): void {
+      if (selfHandle && state.handle === selfHandle) return;
+      const next = rememberRecent(state);
+      if (article) articleMeta.set(article, { handle: next.handle });
+
+      const known = handleTags.get(next.handle);
+      if (known) {
+        if (article) paint(article, known);
+        return;
+      }
+      if (queued.has(next.handle)) return;
+
+      const prev = timers.get(next.handle);
+      if (prev) window.clearTimeout(prev);
+      const id = window.setTimeout(() => {
+        timers.delete(next.handle);
+        void requestTag(next, article);
+      }, VIEWPORT_DEBOUNCE_MS);
+      timers.set(next.handle, id);
+    }
+
     function scheduleTag(article: HTMLElement): void {
       const state = extractAuthor(article);
       if (!state) return;
-      articleMeta.set(article, { handle: state.handle });
-
-      const known = handleTags.get(state.handle);
-      if (known) {
-        paint(article, known);
-        return;
-      }
-
-      if (queued.has(state.handle)) return;
-      const prev = timers.get(state.handle);
-      if (prev) window.clearTimeout(prev);
-      const id = window.setTimeout(() => {
-        timers.delete(state.handle);
-        void requestTag(article, state);
-      }, VIEWPORT_DEBOUNCE_MS);
-      timers.set(state.handle, id);
+      scheduleState(state, article);
     }
 
     async function requestTag(
-      article: HTMLElement,
-      state: { handle: string; displayName: string; bio: string; recentText: string },
+      state: AccountState,
+      article?: HTMLElement,
     ): Promise<void> {
       if (handleTags.has(state.handle) || queued.has(state.handle)) {
         const known = handleTags.get(state.handle);
-        if (known) paint(article, known);
+        if (known && article) paint(article, known);
         return;
       }
       queued.add(state.handle);
       try {
-        const res = await tagAccount(state);
+        const res = await tagAccount(rememberRecent(state));
         if (!res.ok) {
           if (res.code === 'NO_KEY') showMissingKeyBanner();
-          // fail-open: leave the post visible
           return;
         }
         handleTags.set(state.handle, res.result);
@@ -112,14 +154,50 @@ export default defineContentScript({
           const meta = articleMeta.get(other);
           if (meta?.handle === state.handle) paint(other, res.result);
         }
+        if (res.shouldBlock && !res.alreadyBlocked) void drainQueue();
       } catch {
-        // fail-open
+        // fail-open: leave the user visible
       } finally {
         queued.delete(state.handle);
       }
     }
 
+    async function drainQueue(): Promise<void> {
+      if (draining) return;
+      draining = true;
+      try {
+        while (true) {
+          const res = await claimBlockJobs();
+          if (!res.ok || !res.jobs.length) break;
+          for (const job of res.jobs) {
+            blockByHandle.set(job.handle, job);
+            repaintAll();
+            if (selfHandle && job.handle === selfHandle) {
+              await reportBlock({
+                handle: job.handle,
+                ok: false,
+                confirmed: false,
+                error: 'Refusing to block the logged-in account',
+              });
+              continue;
+            }
+            const result = await blockOnPage(job.handle, job.userId);
+            await reportBlock({
+              handle: job.handle,
+              ok: result.ok,
+              confirmed: result.confirmed,
+              error: result.error,
+            });
+            await new Promise((r) => setTimeout(r, MIN_BLOCK_INTERVAL_MS));
+          }
+        }
+      } finally {
+        draining = false;
+      }
+    }
+
     function observeFeed(): void {
+      selfHandle = viewerHandle() ?? selfHandle;
       for (const article of findTweetArticles()) {
         io.observe(article);
         const state = extractAuthor(article);
@@ -128,17 +206,15 @@ export default defineContentScript({
         const known = handleTags.get(state.handle);
         if (known) paint(article, known);
       }
+      const profile = extractProfileAccount();
+      if (profile) scheduleState(profile);
     }
 
     async function boot(): Promise<void> {
-      const settings: Settings = (await settingsItem.getValue()) ?? {
-        apiKey: '',
-        tags: [],
-        hideTags: [],
-        cacheTtlHours: 168,
-      };
-      hideTags = settings.hideTags ?? [];
+      const stored = (await blocksItem.getValue()) ?? {};
+      blockByHandle = new Map(Object.entries(stored));
       observeFeed();
+      void drainQueue();
     }
 
     const mo = new MutationObserver(() => observeFeed());
@@ -147,17 +223,27 @@ export default defineContentScript({
     ctx.addEventListener(window, 'wxt:locationchange', () => {
       bannerShown = false;
       observeFeed();
+      void drainQueue();
     });
 
-    const unwatch = settingsItem.watch((next) => {
-      hideTags = next?.hideTags ?? [];
+    const unwatchSettings = settingsItem.watch(() => {
       repaintAll();
+    });
+
+    const unwatchBlocks = blocksItem.watch((next) => {
+      blockByHandle = new Map(Object.entries(next ?? {}));
+      repaintAll();
+      const hasPending = Object.values(next ?? {}).some(
+        (r) => r.status === 'pending',
+      );
+      if (hasPending) void drainQueue();
     });
 
     ctx.onInvalidated(() => {
       mo.disconnect();
       io.disconnect();
-      unwatch();
+      unwatchSettings();
+      unwatchBlocks();
       for (const id of timers.values()) window.clearTimeout(id);
     });
 

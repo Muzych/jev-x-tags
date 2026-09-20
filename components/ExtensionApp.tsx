@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
-import { clearCache, getSettings, getStatus, setSettings } from '@/lib/messaging';
-import type { LogEntry, Settings } from '@/lib/types';
+import { emptyCounts } from '@/lib/block';
+import {
+  blockAllMatching,
+  clearCache,
+  getSettings,
+  getStatus,
+  setSettings,
+} from '@/lib/messaging';
+import type { BlockCounts, BlockRecord, LogEntry, Settings } from '@/lib/types';
 import { SettingsPanel } from './SettingsPanel';
 
 export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
@@ -10,6 +17,8 @@ export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [cacheSize, setCacheSize] = useState(0);
   const [hasKey, setHasKey] = useState(false);
+  const [blocks, setBlocks] = useState<BlockRecord[]>([]);
+  const [blockCounts, setBlockCounts] = useState<BlockCounts>(emptyCounts());
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -21,6 +30,8 @@ export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
       setLog(st.log);
       setCacheSize(st.cacheSize);
       setHasKey(st.hasKey);
+      setBlocks(st.blocks);
+      setBlockCounts(st.blockCounts);
     }
     setReady(true);
   }, []);
@@ -42,12 +53,14 @@ export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
 
   return (
     <SettingsPanel
-      key={`${settings.apiKey}:${settings.tags.length}:${cacheSize}`}
+      key={`${settings.apiKey}:${settings.tags.length}:${cacheSize}:${blockCounts.pending}`}
       variant={variant}
       settings={settings}
       log={log}
       cacheSize={cacheSize}
       hasKey={hasKey}
+      blocks={blocks}
+      blockCounts={blockCounts}
       busy={busy}
       notice={notice}
       onSave={async (next) => {
@@ -68,8 +81,24 @@ export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
         setBusy(true);
         try {
           await clearCache();
-          setNotice('缓存和日志已清空。');
+          setNotice('打标缓存和日志已清空（已确认拉黑记录保留）。');
           await refresh();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onBlockMatching={async () => {
+        setBusy(true);
+        setNotice(null);
+        try {
+          const res = await blockAllMatching();
+          if (!res.ok) throw new Error(res.error);
+          setNotice(
+            `已入队 ${res.queued} 个账号（跳过 ${res.skipped}）。打开 x.com 后会用当前登录会话执行；失败保持可见。`,
+          );
+          await refresh();
+        } catch (err) {
+          setNotice(err instanceof Error ? err.message : String(err));
         } finally {
           setBusy(false);
         }

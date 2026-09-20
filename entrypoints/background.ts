@@ -1,6 +1,15 @@
+import {
+  applyBlockReport,
+  claimJobs,
+  enqueueBlock,
+  isConfirmedBlock,
+  listMatchingHandles,
+  recentBlocks,
+  shouldSkipAutoEnqueue,
+  summarizeBlocks,
+} from '@/lib/block';
 import { isFresh, pruneCache } from '@/lib/cache';
-import { DEFAULT_SETTINGS } from '@/lib/defaults';
-import { MIN_JEV_INTERVAL_MS } from '@/lib/defaults';
+import { DEFAULT_SETTINGS, MIN_JEV_INTERVAL_MS } from '@/lib/defaults';
 import { normalizeHandle } from '@/lib/handles';
 import {
   JEV_ENDPOINT,
@@ -8,15 +17,24 @@ import {
   jevHeaders,
   parseJevResponse,
 } from '@/lib/jev';
+import { shouldBlockByTag } from '@/lib/match';
 import {
   appendLog,
   cacheItem,
   clearCacheAndLog,
   logItem,
+  readBlocks,
   readSettings,
+  writeBlocks,
   writeSettings,
 } from '@/lib/storage';
-import type { AccountState, CacheEntry, Message, Response } from '@/lib/types';
+import type {
+  AccountState,
+  BlockRecord,
+  CacheEntry,
+  Message,
+  Response,
+} from '@/lib/types';
 
 export default defineBackground(() => {
   const inflight = new Map<string, Promise<Response>>();
@@ -27,6 +45,40 @@ export default defineBackground(() => {
     const wait = nextSlot - now;
     nextSlot = Math.max(now, nextSlot) + MIN_JEV_INTERVAL_MS;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  }
+
+  async function maybeEnqueue(
+    handle: string,
+    tag: string,
+    userId: string | undefined,
+    force: boolean,
+  ): Promise<{ enqueued: boolean; alreadyBlocked: boolean }> {
+    const settings = await readSettings();
+    const current = (await readBlocks())[handle];
+    if (isConfirmedBlock(current)) {
+      return { enqueued: false, alreadyBlocked: true };
+    }
+    if (!shouldBlockByTag(tag, settings.blockTags)) {
+      return { enqueued: false, alreadyBlocked: false };
+    }
+    if (!force && shouldSkipAutoEnqueue(current)) {
+      return { enqueued: false, alreadyBlocked: false };
+    }
+    const { blocks, enqueued } = enqueueBlock(
+      await readBlocks(),
+      { handle, userId, tag, force },
+    );
+    if (enqueued) {
+      await writeBlocks(blocks);
+      await appendLog({
+        handle,
+        tag,
+        source: 'block',
+        message: 'queued for platform block',
+        at: Date.now(),
+      });
+    }
+    return { enqueued, alreadyBlocked: false };
   }
 
   async function tagFromJev(state: AccountState): Promise<Response> {
@@ -61,9 +113,15 @@ export default defineBackground(() => {
         source: 'cache',
         at: Date.now(),
       });
+      const shouldBlock = shouldBlockByTag(cached.tag, settings.blockTags);
+      const queued = shouldBlock
+        ? await maybeEnqueue(handle, cached.tag, state.userId ?? cached.userId, false)
+        : { enqueued: false, alreadyBlocked: isConfirmedBlock((await readBlocks())[handle]) };
       return {
         ok: true,
         result: { ...cached, handle, cached: true },
+        shouldBlock,
+        alreadyBlocked: queued.alreadyBlocked,
       };
     }
 
@@ -100,6 +158,7 @@ export default defineBackground(() => {
           confidence: parsed.confidence,
           shouldHideCandidate: parsed.shouldHideCandidate,
           taggedAt: Date.now(),
+          userId: state.userId,
         };
         const latest = (await cacheItem.getValue()) ?? {};
         latest[handle] = entry;
@@ -112,7 +171,16 @@ export default defineBackground(() => {
           source: 'api',
           at: entry.taggedAt,
         });
-        return { ok: true, result: { ...entry, handle, cached: false } };
+        const shouldBlock = shouldBlockByTag(entry.tag, settings.blockTags);
+        const queued = shouldBlock
+          ? await maybeEnqueue(handle, entry.tag, state.userId, false)
+          : { enqueued: false, alreadyBlocked: isConfirmedBlock((await readBlocks())[handle]) };
+        return {
+          ok: true,
+          result: { ...entry, handle, cached: false },
+          shouldBlock,
+          alreadyBlocked: queued.alreadyBlocked,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const code = message.startsWith('Jev response')
@@ -134,6 +202,24 @@ export default defineBackground(() => {
     return job;
   }
 
+  async function statusPayload(): Promise<Response> {
+    const settings = await readSettings();
+    const cache = pruneCache(
+      (await cacheItem.getValue()) ?? {},
+      settings.cacheTtlHours,
+    );
+    await cacheItem.setValue(cache);
+    const blocks = await readBlocks();
+    return {
+      ok: true,
+      hasKey: Boolean(settings.apiKey),
+      cacheSize: Object.keys(cache).length,
+      log: (await logItem.getValue()) ?? [],
+      blocks: recentBlocks(blocks),
+      blockCounts: summarizeBlocks(blocks),
+    };
+  }
+
   async function handleMessage(message: Message): Promise<Response> {
     switch (message.type) {
       case 'TAG_ACCOUNT':
@@ -146,15 +232,73 @@ export default defineBackground(() => {
       case 'CLEAR_CACHE':
         await clearCacheAndLog();
         return { ok: true };
-      case 'GET_STATUS': {
+      case 'GET_STATUS':
+        return statusPayload();
+      case 'CLAIM_BLOCK_JOBS': {
+        const { blocks, claimed } = claimJobs(await readBlocks());
+        await writeBlocks(blocks);
+        return { ok: true, jobs: claimed };
+      }
+      case 'REPORT_BLOCK': {
+        const handle = normalizeHandle(message.payload.handle);
+        const current = (await readBlocks())[handle];
+        const next: BlockRecord = applyBlockReport(current ?? {
+          handle,
+          status: 'pending',
+          confirmed: false,
+          queuedAt: Date.now(),
+          updatedAt: Date.now(),
+        }, message.payload);
+        const blocks = { ...(await readBlocks()), [handle]: next };
+        await writeBlocks(blocks);
+        await appendLog({
+          handle,
+          tag: next.tag,
+          source: 'block',
+          message: next.confirmed
+            ? 'blocked (confirmed)'
+            : next.error ?? 'block failed',
+          at: next.updatedAt,
+        });
+        return { ok: true };
+      }
+      case 'BLOCK_ALL_MATCHING': {
         const settings = await readSettings();
-        const cache = pruneCache((await cacheItem.getValue()) ?? {}, settings.cacheTtlHours);
-        await cacheItem.setValue(cache);
+        const cache = (await cacheItem.getValue()) ?? {};
+        const matches = listMatchingHandles(cache, settings.blockTags);
+        let queued = 0;
+        let skipped = 0;
+        let blocks = await readBlocks();
+        for (const handle of matches) {
+          if (isConfirmedBlock(blocks[handle])) {
+            skipped += 1;
+            continue;
+          }
+          const result = enqueueBlock(
+            blocks,
+            {
+              handle,
+              userId: cache[handle]?.userId,
+              tag: cache[handle]?.tag,
+              force: true,
+            },
+          );
+          blocks = result.blocks;
+          if (result.enqueued) queued += 1;
+          else skipped += 1;
+        }
+        await writeBlocks(blocks);
+        await appendLog({
+          handle: '*',
+          source: 'block',
+          message: `block-all queued ${queued}, skipped ${skipped}`,
+          at: Date.now(),
+        });
         return {
           ok: true,
-          hasKey: Boolean(settings.apiKey),
-          cacheSize: Object.keys(cache).length,
-          log: (await logItem.getValue()) ?? [],
+          queued,
+          skipped,
+          blockCounts: summarizeBlocks(blocks),
         };
       }
       default:

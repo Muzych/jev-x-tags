@@ -66,6 +66,84 @@ function bioNear(article: Element): string {
   return '';
 }
 
+export function pageBio(root: ParentNode = document): string {
+  const desc = root.querySelector('[data-testid="UserDescription"]');
+  return desc ? clip(textOf(desc), MAX_BIO) : '';
+}
+
+export function extractUserId(root: Element): string | undefined {
+  for (const el of root.querySelectorAll('[data-testid$="-follow"], [data-testid$="-unfollow"]')) {
+    const id = el.getAttribute('data-testid')?.match(/^(\d+)-(?:un)?follow$/)?.[1];
+    if (id) return id;
+  }
+  for (const a of root.querySelectorAll('a[href*="/i/user/"]')) {
+    const id = (a.getAttribute('href') ?? '').match(/\/i\/user\/(\d+)/)?.[1];
+    if (id) return id;
+  }
+  return restIdFromFiber(root);
+}
+
+/** Walk a few React fiber parents for rest_id — X often stores it there. */
+function restIdFromFiber(root: Element): string | undefined {
+  const fiberKey = Object.keys(root).find((k) => k.startsWith('__reactFiber'));
+  if (!fiberKey) return undefined;
+  let fiber: { return?: unknown; memoizedProps?: Record<string, unknown> } | undefined =
+    (root as unknown as Record<string, unknown>)[fiberKey] as
+      | { return?: unknown; memoizedProps?: Record<string, unknown> }
+      | undefined;
+
+  for (let i = 0; i < 36 && fiber; i++) {
+    const props = fiber.memoizedProps;
+    const id = numericIdFromProps(props);
+    if (id) return id;
+    fiber = fiber.return as typeof fiber;
+  }
+  return undefined;
+}
+
+function numericIdFromProps(props: Record<string, unknown> | undefined): string | undefined {
+  if (!props) return undefined;
+  const user = isRecord(props.user) ? props.user : undefined;
+  const tweet = isRecord(props.tweet) ? props.tweet : undefined;
+  const core = tweet && isRecord(tweet.core) ? tweet.core : undefined;
+  const userResults =
+    core && isRecord(core.user_results)
+      ? core.user_results
+      : isRecord(props.user_results)
+        ? props.user_results
+        : undefined;
+  const result = userResults && isRecord(userResults.result) ? userResults.result : undefined;
+
+  const candidates = [
+    props.rest_id,
+    props.userId,
+    props.user_id_str,
+    user?.rest_id,
+    user?.id_str,
+    result?.rest_id,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && /^\d{4,}$/.test(value)) return value;
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function mergeRecentText(existing: string, next: string): string {
+  const parts = [existing, next]
+    .flatMap((chunk) => chunk.split(/\s*\|\s*/))
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const unique: string[] = [];
+  for (const part of parts) {
+    if (!unique.includes(part)) unique.push(part);
+  }
+  return clip(unique.slice(0, 4).join(' | '), MAX_RECENT_TEXT);
+}
+
 export function extractAuthor(article: Element): AccountState | null {
   const userName =
     article.querySelector('[data-testid="User-Name"]') ??
@@ -91,11 +169,55 @@ export function extractAuthor(article: Element): AccountState | null {
     textOf(article.querySelector('[data-testid="tweetText"]')),
     MAX_RECENT_TEXT,
   );
+  const bio = bioNear(article) || pageBio(article.ownerDocument ?? document);
 
   return {
     handle,
     displayName,
-    bio: bioNear(article),
+    bio,
     recentText,
+    userId: extractUserId(article),
   };
+}
+
+export function extractProfileAccount(
+  root: ParentNode = document,
+  pathname = location.pathname,
+): AccountState | null {
+  if (/\/status\//.test(pathname)) return null;
+  const handle = handleFromPath(pathname);
+  if (!handle) return null;
+
+  const userName =
+    root.querySelector('[data-testid="UserName"]') ??
+    root.querySelector('[data-testid="User-Name"]');
+  const displayName = userName
+    ? displayNameFromUserName(userName, handle)
+    : handle;
+  const bio = pageBio(root);
+
+  const texts: string[] = [];
+  for (const article of findTweetArticles(root)) {
+    const author = extractAuthor(article);
+    if (author?.handle === handle && author.recentText) {
+      texts.push(author.recentText);
+    }
+  }
+
+  const scope = root instanceof Element ? root : root.querySelector('main') ?? document.body;
+  return {
+    handle,
+    displayName,
+    bio,
+    recentText: clip(texts.join(' | '), MAX_RECENT_TEXT),
+    userId: scope instanceof Element ? extractUserId(scope) : undefined,
+  };
+}
+
+export function viewerHandle(root: ParentNode = document): string | null {
+  const profile = root.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+  if (profile instanceof HTMLAnchorElement) {
+    return handleFromPath(hrefPath(profile));
+  }
+  return null;
 }

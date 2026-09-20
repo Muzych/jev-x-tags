@@ -1,5 +1,7 @@
-.jev-hidden {
-  display: none !important;
+/* CSS hide of posts is intentionally gone. Pending blocks may dim only. */
+.jev-block-pending {
+  opacity: 0.48;
+  transition: opacity 160ms ease;
 }
 
 .jev-tag-badge {
