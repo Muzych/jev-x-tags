@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
-import type { LogEntry, Settings, TagDefinition } from '@/lib/types';
+import type { BlockCounts, BlockRecord, LogEntry, Settings, TagDefinition } from '@/lib/types';
 import './settings.css';
 
 export interface SettingsPanelProps {
@@ -9,10 +9,13 @@ export interface SettingsPanelProps {
   log: LogEntry[];
   cacheSize: number;
   hasKey: boolean;
+  blocks: BlockRecord[];
+  blockCounts: BlockCounts;
   busy?: boolean;
   notice?: string | null;
   onSave: (settings: Settings) => Promise<void> | void;
   onClearCache: () => Promise<void> | void;
+  onBlockMatching?: () => Promise<void> | void;
   onOpenOptions?: () => void;
 }
 
@@ -30,22 +33,26 @@ export function SettingsPanel({
   log,
   cacheSize,
   hasKey,
+  blocks,
+  blockCounts,
   busy,
   notice,
   onSave,
   onClearCache,
+  onBlockMatching,
   onOpenOptions,
 }: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [tags, setTags] = useState<TagDefinition[]>(settings.tags);
-  const [hideTags, setHideTags] = useState<string[]>(settings.hideTags);
+  const [blockTags, setBlockTags] = useState<string[]>(settings.blockTags);
   const [ttl, setTtl] = useState(String(settings.cacheTtlHours));
   const compact = variant === 'popup';
 
-  const hideSet = useMemo(() => new Set(hideTags), [hideTags]);
+  const blockSet = useMemo(() => new Set(blockTags), [blockTags]);
+  const pendingTotal = blockCounts.pending + blockCounts.blocking;
 
-  function toggleHide(id: string) {
-    setHideTags((cur) =>
+  function toggleBlock(id: string) {
+    setBlockTags((cur) =>
       cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id],
     );
   }
@@ -58,7 +65,7 @@ export function SettingsPanel({
     await onSave({
       apiKey,
       tags,
-      hideTags,
+      blockTags,
       cacheTtlHours: Number(ttl) || DEFAULT_SETTINGS.cacheTtlHours,
     });
   }
@@ -70,7 +77,7 @@ export function SettingsPanel({
           <p className="jev-kicker">TypeSafe Jev · System One</p>
           <h1>Jev X Tags</h1>
           <p className="jev-sub">
-            给 X/Twitter 账号打标签，并按你选择的标签隐藏帖子。
+            用名字 / 简介 / 评论给 X 账号打标签，再按标签批量拉黑账号。
           </p>
         </div>
         <span className={`jev-pill ${hasKey ? 'ok' : 'warn'}`}>
@@ -80,7 +87,7 @@ export function SettingsPanel({
 
       {!hasKey && (
         <div className="jev-banner" role="status">
-          密钥只存在扩展本地存储，不会写入仓库。没有 key 时不会隐藏任何帖子（fail-open）。
+          密钥只存在扩展本地存储，不会写入仓库。没有 key 时不会打标或拉黑（fail-open）。
         </div>
       )}
 
@@ -108,18 +115,19 @@ export function SettingsPanel({
       </section>
 
       <section className="jev-card">
-        <h2>隐藏标签 Hide tags</h2>
+        <h2>自动拉黑标签 Auto-block tags</h2>
         <p className="jev-help">
-          作者的 <code>primary_tag.choice</code> 落在这些标签上时，帖子会被 CSS
-          隐藏。Jev 的 noul 只作为建议，不单独决定隐藏。
+          作者的 <code>primary_tag.choice</code> 落在这些标签上时，扩展会把该{' '}
+          <strong>账号</strong>加入拉黑队列，用你已登录的 X 会话执行平台拉黑。
+          不会再用 CSS 藏帖。Jev 的 noul 只作为建议，不单独拉黑。
         </p>
         <div className="jev-chips">
           {tags.map((tag) => (
             <label key={tag.id} className="jev-chip">
               <input
                 type="checkbox"
-                checked={hideSet.has(tag.id)}
-                onChange={() => toggleHide(tag.id)}
+                checked={blockSet.has(tag.id)}
+                onChange={() => toggleBlock(tag.id)}
               />
               <span>{tag.id}</span>
             </label>
@@ -180,6 +188,43 @@ export function SettingsPanel({
       )}
 
       <section className="jev-card">
+        <h2>拉黑队列 / Block queue</h2>
+        <div className="jev-counts" aria-label="block queue counts">
+          <span className="jev-count pending">待处理 {pendingTotal}</span>
+          <span className="jev-count blocked">已拉黑 {blockCounts.blocked}</span>
+          <span className="jev-count failed">失败 {blockCounts.failed}</span>
+        </div>
+        <p className="jev-help">
+          使用当前 x.com 登录会话执行。待处理任务需要打开 X 时间线。
+          失败会保持账号可见并记入日志，不会假装成功。已确认拉黑的 handle 不会重试。
+        </p>
+        {blocks.length === 0 ? (
+          <p className="jev-empty">队列是空的。打标匹配后会出现待拉黑账号。</p>
+        ) : (
+          <ul className="jev-log">
+            {blocks.slice(0, compact ? 6 : 24).map((entry) => (
+              <li key={`${entry.handle}-${entry.updatedAt}`}>
+                <div className="jev-log-top">
+                  <strong>@{entry.handle}</strong>
+                  <span className={`jev-src ${entry.status}`}>{entry.status}</span>
+                </div>
+                <p>
+                  {entry.tag && (
+                    <>
+                      tag <code>{entry.tag}</code>
+                      {' · '}
+                    </>
+                  )}
+                  {entry.confirmed ? '已确认平台拉黑' : (entry.error ?? '等待 x.com 会话执行')}
+                </p>
+                <time>{formatWhen(entry.updatedAt)}</time>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="jev-card">
         <h2>缓存</h2>
         <div className="jev-row">
           <label className="jev-label" htmlFor="jev-ttl">
@@ -196,14 +241,25 @@ export function SettingsPanel({
           />
           <span className="jev-muted">已缓存 {cacheSize} 个账号</span>
         </div>
+        <p className="jev-help">清空缓存不会丢掉已确认的拉黑记录，避免重复请求。</p>
       </section>
 
       <div className="jev-actions">
         <button type="button" className="jev-btn primary" disabled={busy} onClick={() => void save()}>
           保存设置
         </button>
+        {onBlockMatching && (
+          <button
+            type="button"
+            className="jev-btn"
+            disabled={busy}
+            onClick={() => void onBlockMatching()}
+          >
+            立即拉黑所有匹配账号
+          </button>
+        )}
         <button type="button" className="jev-btn" disabled={busy} onClick={() => void onClearCache()}>
-          清空缓存与日志
+          清空打标缓存与日志
         </button>
         {compact && onOpenOptions && (
           <button type="button" className="jev-btn ghost" onClick={onOpenOptions}>
@@ -234,7 +290,7 @@ export function SettingsPanel({
                       {entry.shouldHideCandidate != null && (
                         <>
                           {' '}
-                          · 建议过滤 {entry.shouldHideCandidate.toFixed(2)}
+                          · 建议拉黑 {entry.shouldHideCandidate.toFixed(2)}
                         </>
                       )}
                     </>
@@ -242,7 +298,9 @@ export function SettingsPanel({
                     entry.message ?? '—'
                   )}
                 </p>
-                {entry.tag && entry.message && <p>{entry.message}</p>}
+                {entry.message && (entry.tag || entry.source === 'block') && (
+                  <p>{entry.message}</p>
+                )}
                 <time>{formatWhen(entry.at)}</time>
               </li>
             ))}

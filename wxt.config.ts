@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: 'Jev X Tags',
     description:
-      'Tag X/Twitter accounts with TypeSafe Jev and hide posts by tag.',
+      'Tag X/Twitter accounts with TypeSafe Jev and batch-block matching users.',
     permissions: ['storage'],
     host_permissions: [
       'https://x.com/*',

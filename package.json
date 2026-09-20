@@ -1,8 +1,8 @@
 {
   "name": "jev-x-tags",
-  "description": "Tag X/Twitter accounts with TypeSafe Jev and hide posts by tag.",
+  "description": "Tag X/Twitter accounts with TypeSafe Jev and batch-block matching users.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

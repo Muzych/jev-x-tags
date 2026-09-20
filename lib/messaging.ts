@@ -1,6 +1,9 @@
 import { browser } from 'wxt/browser';
 import type {
   AccountState,
+  BlockAllOk,
+  BlockReport,
+  ClaimJobsOk,
   Fail,
   Message,
   Response,
@@ -33,4 +36,16 @@ export function getStatus() {
 
 export function clearCache() {
   return send<SimpleOk | Fail>({ type: 'CLEAR_CACHE' });
+}
+
+export function claimBlockJobs() {
+  return send<ClaimJobsOk | Fail>({ type: 'CLAIM_BLOCK_JOBS' });
+}
+
+export function reportBlock(payload: BlockReport) {
+  return send<SimpleOk | Fail>({ type: 'REPORT_BLOCK', payload });
+}
+
+export function blockAllMatching() {
+  return send<BlockAllOk | Fail>({ type: 'BLOCK_ALL_MATCHING' });
 }
