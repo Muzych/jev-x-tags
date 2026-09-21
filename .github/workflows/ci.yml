@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Typecheck
+        run: pnpm compile
+
+      - name: Zip Chrome MV3 extension
+        run: pnpm zip
+
+      - name: Stage release zip
+        run: |
+          mkdir -p dist
+          zip_path="$(ls -1 .output/*-chrome.zip .output/*.zip 2>/dev/null | head -n 1 || true)"
+          if [ -z "$zip_path" ]; then
+            echo "No zip produced under .output/"
+            ls -la .output || true
+            exit 1
+          fi
+          cp "$zip_path" dist/jev-x-tags-chrome-mv3.zip
+          echo "Packaged $zip_path -> dist/jev-x-tags-chrome-mv3.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jev-x-tags-chrome-mv3
+          path: dist/jev-x-tags-chrome-mv3.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decide whether to publish a GitHub Release
+        id: meta
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          prev="0.0.0"
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            prev="$(git show HEAD^:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          fi
+
+          if [[ "$version" != "$prev" ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.meta.outputs.should_release == 'true'
+        with:
+          name: jev-x-tags-chrome-mv3
+          path: dist
+
+      - name: Create GitHub Release
+        if: steps.meta.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          files: dist/jev-x-tags-chrome-mv3.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

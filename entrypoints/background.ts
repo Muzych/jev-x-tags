@@ -1,6 +1,6 @@
 import {
   applyBlockReport,
-  claimJobs,
+  claimJobsForDrain,
   enqueueBlock,
   isConfirmedBlock,
   listMatchingHandles,
@@ -17,7 +17,7 @@ import {
   jevHeaders,
   parseJevResponse,
 } from '@/lib/jev';
-import { shouldBlockByTag } from '@/lib/match';
+import { shouldBlockByTag, shouldEnqueueBlock } from '@/lib/match';
 import {
   appendLog,
   cacheItem,
@@ -58,7 +58,7 @@ export default defineBackground(() => {
     if (isConfirmedBlock(current)) {
       return { enqueued: false, alreadyBlocked: true };
     }
-    if (!shouldBlockByTag(tag, settings.blockTags)) {
+    if (!shouldEnqueueBlock(tag, settings.blockTags, settings.autoBlockEnabled)) {
       return { enqueued: false, alreadyBlocked: false };
     }
     if (!force && shouldSkipAutoEnqueue(current)) {
@@ -235,8 +235,12 @@ export default defineBackground(() => {
       case 'GET_STATUS':
         return statusPayload();
       case 'CLAIM_BLOCK_JOBS': {
-        const { blocks, claimed } = claimJobs(await readBlocks());
-        await writeBlocks(blocks);
+        const settings = await readSettings();
+        const { blocks, claimed } = claimJobsForDrain(
+          await readBlocks(),
+          settings.autoBlockEnabled,
+        );
+        if (claimed.length) await writeBlocks(blocks);
         return { ok: true, jobs: claimed };
       }
       case 'REPORT_BLOCK': {
@@ -269,6 +273,20 @@ export default defineBackground(() => {
         let queued = 0;
         let skipped = 0;
         let blocks = await readBlocks();
+        if (!settings.autoBlockEnabled) {
+          await appendLog({
+            handle: '*',
+            source: 'block',
+            message: 'auto-block off; skipped block-all (pending jobs left untouched)',
+            at: Date.now(),
+          });
+          return {
+            ok: true,
+            queued: 0,
+            skipped: matches.length,
+            blockCounts: summarizeBlocks(blocks),
+          };
+        }
         for (const handle of matches) {
           if (isConfirmedBlock(blocks[handle])) {
             skipped += 1;

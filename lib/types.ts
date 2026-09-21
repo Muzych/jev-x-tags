@@ -8,6 +8,12 @@ export interface Settings {
   tags: TagDefinition[];
   /** Tags that enqueue a platform account block (not CSS hide). */
   blockTags: string[];
+  /**
+   * Master safety switch. When false, tagging and match display still run,
+   * but jobs are not enqueued and the block API / UI fallback never fire.
+   * Pending jobs stay pending (not cancelled) until this is turned on.
+   */
+  autoBlockEnabled: boolean;
   cacheTtlHours: number;
 }
 

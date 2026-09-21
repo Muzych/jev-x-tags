@@ -54,6 +54,25 @@ describe('extractAuthor', () => {
     });
   });
 
+  it('reads handle from User-Names and profile UserName hosts', () => {
+    const names = mount(`
+      <article data-testid="tweet">
+        <div data-testid="User-Names">
+          <a href="/bob"><span>@bob</span></a>
+        </div>
+      </article>
+    `);
+    expect(extractAuthor(names.querySelector('article')!)?.handle).toBe('bob');
+
+    const profile = mount(`
+      <div data-testid="UserName">
+        <a href="/carol"><span>Carol</span></a>
+        <a href="/carol"><span>@carol</span></a>
+      </div>
+    `);
+    expect(extractProfileAccount(profile, '/carol')?.handle).toBe('carol');
+  });
+
   it('returns null when no author handle is present', () => {
     const root = mount('<article data-testid="tweet"><p>ad</p></article>');
     expect(extractAuthor(root.querySelector('article')!)).toBeNull();

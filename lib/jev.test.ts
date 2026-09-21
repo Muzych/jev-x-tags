@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TAGS } from './defaults';
+import type { TagDefinition } from './types';
 import { buildCriteria, buildJevRequest, parseJevResponse } from './jev';
+
+const FIXTURE_TAGS: TagDefinition[] = [
+  { id: 'news', description: 'Journalists or current events.' },
+  { id: 'other', description: 'Does not fit a more specific tag.' },
+];
 
 describe('buildCriteria', () => {
   it('maps tag descriptions and forces other=null', () => {
-    const criteria = buildCriteria(DEFAULT_TAGS);
-    expect(criteria.spam).toContain('Scam');
+    const criteria = buildCriteria(FIXTURE_TAGS);
+    expect(criteria.news).toContain('Journalists');
     expect(criteria.other).toBeNull();
   });
 
@@ -13,6 +18,10 @@ describe('buildCriteria', () => {
     const criteria = buildCriteria([{ id: 'news', description: 'News' }]);
     expect(criteria.other).toBeNull();
     expect(criteria.news).toBe('News');
+  });
+
+  it('still emits other=null when the tag list is empty', () => {
+    expect(buildCriteria([])).toEqual({ other: null });
   });
 });
 
@@ -25,7 +34,7 @@ describe('buildJevRequest', () => {
         bio: 'builds compilers',
         recentText: 'shipped a parser',
       },
-      DEFAULT_TAGS,
+      FIXTURE_TAGS,
     );
 
     expect(body.model).toBe('jev-latest');

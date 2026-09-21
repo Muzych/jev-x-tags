@@ -1,4 +1,10 @@
-import { MIN_BLOCK_INTERVAL_MS, VIEWPORT_DEBOUNCE_MS } from '@/lib/defaults';
+import { paintNameHosts } from '@/lib/badge';
+import { createCoalescer } from '@/lib/coalesce';
+import {
+  FEED_SCAN_MS,
+  MIN_BLOCK_INTERVAL_MS,
+  VIEWPORT_DEBOUNCE_MS,
+} from '@/lib/defaults';
 import {
   extractAuthor,
   extractProfileAccount,
@@ -7,9 +13,10 @@ import {
   viewerHandle,
 } from '@/lib/extract';
 import { claimBlockJobs, reportBlock, tagAccount } from '@/lib/messaging';
+import { normalizeSettings } from '@/lib/settings';
 import { blocksItem, settingsItem } from '@/lib/storage';
 import { blockOnPage } from '@/lib/xblock-page';
-import type { AccountState, BlockRecord, TagResult } from '@/lib/types';
+import type { AccountState, BlockRecord, Settings, TagResult } from '@/lib/types';
 import './style.css';
 
 export default defineContentScript({
@@ -22,10 +29,13 @@ export default defineContentScript({
     const recentByHandle = new Map<string, string>();
     const queued = new Set<string>();
     const timers = new Map<string, number>();
+    const observedArticles = new WeakSet<HTMLElement>();
     let blockByHandle = new Map<string, BlockRecord>();
     let bannerShown = false;
     let draining = false;
     let selfHandle: string | null = null;
+    let autoBlockEnabled = false;
+    let blockTags: string[] = [];
 
     const io = new IntersectionObserver(
       (entries) => {
@@ -39,51 +49,53 @@ export default defineContentScript({
       { root: null, rootMargin: '120px 0px', threshold: 0.05 },
     );
 
+    function applySettings(raw: Settings | null | undefined): void {
+      const settings = normalizeSettings(raw);
+      autoBlockEnabled = settings.autoBlockEnabled;
+      blockTags = settings.blockTags;
+    }
+
     function blockStatus(handle: string): BlockRecord | undefined {
       return blockByHandle.get(handle);
     }
 
-    function paint(article: HTMLElement, result: TagResult): void {
+    /** Badges are independent of auto-block — tagging-only mode still paints. */
+    function paintBadges(): void {
+      paintNameHosts(handleTags, {
+        blockTags,
+        autoBlockEnabled,
+        recordFor: blockStatus,
+      });
+    }
+
+    function paintArticleChrome(article: HTMLElement, result: TagResult): void {
       const record = blockStatus(result.handle);
       const pending =
-        record?.status === 'pending' || record?.status === 'blocking';
+        autoBlockEnabled &&
+        (record?.status === 'pending' || record?.status === 'blocking');
       article.classList.toggle('jev-block-pending', Boolean(pending));
       if (pending) article.setAttribute('data-jev-pending', '1');
       else article.removeAttribute('data-jev-pending');
+    }
 
-      const userName = article.querySelector('[data-testid="User-Name"]');
-      if (!userName) return;
-      let badge = article.querySelector<HTMLElement>('.jev-tag-badge');
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'jev-tag-badge';
-        userName.append(badge);
-      }
-      badge.dataset.jevTag = result.tag;
-      const suffix =
-        record?.status === 'blocked'
-          ? ' · blocked'
-          : record?.status === 'failed'
-            ? ' · block failed'
-            : pending
-              ? ' · blocking…'
-              : '';
-      badge.textContent = `${result.tag}${suffix}`;
-      badge.title = record?.error
-        ? `Jev ${result.tag}: ${record.error}`
-        : result.cached
-          ? `Jev tag (cached): ${result.tag}`
-          : `Jev tag: ${result.tag}`;
+    function paint(article: HTMLElement, result: TagResult): void {
+      paintArticleChrome(article, result);
+      paintNameHosts(handleTags, {
+        blockTags,
+        autoBlockEnabled,
+        recordFor: blockStatus,
+        root: article,
+      });
     }
 
     function repaintAll(): void {
       for (const article of findTweetArticles()) {
         const meta = articleMeta.get(article);
-        if (!meta) continue;
-        const result = handleTags.get(meta.handle);
-        if (result) paint(article, result);
+        const result = meta ? handleTags.get(meta.handle) : undefined;
+        if (result) paintArticleChrome(article, result);
         else article.classList.remove('jev-block-pending');
       }
+      paintBadges();
     }
 
     function showMissingKeyBanner(): void {
@@ -114,6 +126,7 @@ export default defineContentScript({
       const known = handleTags.get(next.handle);
       if (known) {
         if (article) paint(article, known);
+        else paintBadges();
         return;
       }
       if (queued.has(next.handle)) return;
@@ -150,11 +163,14 @@ export default defineContentScript({
           return;
         }
         handleTags.set(state.handle, res.result);
+        paintBadges();
         for (const other of findTweetArticles()) {
           const meta = articleMeta.get(other);
-          if (meta?.handle === state.handle) paint(other, res.result);
+          if (meta?.handle === state.handle) paintArticleChrome(other, res.result);
         }
-        if (res.shouldBlock && !res.alreadyBlocked) void drainQueue();
+        if (autoBlockEnabled && res.shouldBlock && !res.alreadyBlocked) {
+          void drainQueue();
+        }
       } catch {
         // fail-open: leave the user visible
       } finally {
@@ -163,13 +179,14 @@ export default defineContentScript({
     }
 
     async function drainQueue(): Promise<void> {
-      if (draining) return;
+      if (!autoBlockEnabled || draining) return;
       draining = true;
       try {
-        while (true) {
+        while (autoBlockEnabled) {
           const res = await claimBlockJobs();
           if (!res.ok || !res.jobs.length) break;
           for (const job of res.jobs) {
+            if (!autoBlockEnabled) break;
             blockByHandle.set(job.handle, job);
             repaintAll();
             if (selfHandle && job.handle === selfHandle) {
@@ -199,35 +216,47 @@ export default defineContentScript({
     function observeFeed(): void {
       selfHandle = viewerHandle() ?? selfHandle;
       for (const article of findTweetArticles()) {
+        if (observedArticles.has(article)) continue;
+        observedArticles.add(article);
         io.observe(article);
-        const state = extractAuthor(article);
-        if (!state) continue;
-        articleMeta.set(article, { handle: state.handle });
-        const known = handleTags.get(state.handle);
-        if (known) paint(article, known);
       }
       const profile = extractProfileAccount();
-      if (profile) scheduleState(profile);
+      if (
+        profile &&
+        profile.handle !== selfHandle &&
+        !handleTags.has(profile.handle) &&
+        !queued.has(profile.handle)
+      ) {
+        scheduleState(profile);
+      }
+      paintBadges();
     }
 
     async function boot(): Promise<void> {
+      applySettings(await settingsItem.getValue());
       const stored = (await blocksItem.getValue()) ?? {};
       blockByHandle = new Map(Object.entries(stored));
       observeFeed();
-      void drainQueue();
+      if (autoBlockEnabled) void drainQueue();
     }
 
-    const mo = new MutationObserver(() => observeFeed());
+    const feedScan = createCoalescer(observeFeed, FEED_SCAN_MS);
+
+    const mo = new MutationObserver(() => feedScan.trigger());
     mo.observe(document.documentElement, { childList: true, subtree: true });
 
     ctx.addEventListener(window, 'wxt:locationchange', () => {
       bannerShown = false;
+      feedScan.cancel();
       observeFeed();
-      void drainQueue();
+      if (autoBlockEnabled) void drainQueue();
     });
 
-    const unwatchSettings = settingsItem.watch(() => {
+    const unwatchSettings = settingsItem.watch((next) => {
+      const wasEnabled = autoBlockEnabled;
+      applySettings(next);
       repaintAll();
+      if (autoBlockEnabled && !wasEnabled) void drainQueue();
     });
 
     const unwatchBlocks = blocksItem.watch((next) => {
@@ -236,10 +265,11 @@ export default defineContentScript({
       const hasPending = Object.values(next ?? {}).some(
         (r) => r.status === 'pending',
       );
-      if (hasPending) void drainQueue();
+      if (hasPending && autoBlockEnabled) void drainQueue();
     });
 
     ctx.onInvalidated(() => {
+      feedScan.cancel();
       mo.disconnect();
       io.disconnect();
       unwatchSettings();

@@ -149,6 +149,31 @@
   cursor: pointer;
 }
 
+.jev-switch {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.jev-switch input {
+  margin-top: 3px;
+}
+
+.jev-switch strong {
+  display: block;
+  font-size: 13px;
+}
+
+.jev-switch .jev-help {
+  display: block;
+  margin: 4px 0 0;
+}
+
 .jev-row {
   display: flex;
   flex-wrap: wrap;
@@ -197,7 +222,7 @@
 
 .jev-btn:disabled {
   opacity: 0.55;
-  cursor: wait;
+  cursor: not-allowed;
 }
 
 .jev-log {
