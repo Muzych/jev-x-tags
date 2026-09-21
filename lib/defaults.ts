@@ -58,6 +58,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
   tags: DEFAULT_TAGS,
   blockTags: [...DEFAULT_BLOCK_TAGS],
+  autoBlockEnabled: false,
   cacheTtlHours: DEFAULT_TTL_HOURS,
 };
 

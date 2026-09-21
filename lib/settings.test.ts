@@ -23,6 +23,17 @@ describe('normalizeSettings', () => {
   it('falls back to default block tags', () => {
     expect(normalizeSettings(null).blockTags).toEqual([...DEFAULT_BLOCK_TAGS]);
   });
+
+  it('defaults autoBlockEnabled to false', () => {
+    expect(normalizeSettings(null).autoBlockEnabled).toBe(false);
+    expect(normalizeSettings({ apiKey: 'sk' }).autoBlockEnabled).toBe(false);
+  });
+
+  it('preserves an explicit autoBlockEnabled true', () => {
+    expect(normalizeSettings({ autoBlockEnabled: true }).autoBlockEnabled).toBe(
+      true,
+    );
+  });
 });
 
 describe('sanitizeSettings', () => {
@@ -34,11 +45,25 @@ describe('sanitizeSettings', () => {
         { id: '', description: 'gone' },
       ],
       blockTags: [' spam ', ''],
+      autoBlockEnabled: true,
       cacheTtlHours: 0,
     });
     expect(next.apiKey).toBe('sk');
     expect(next.tags).toEqual([{ id: 'spam', description: 'x' }]);
     expect(next.blockTags).toEqual(['spam']);
+    expect(next.autoBlockEnabled).toBe(true);
     expect(next.cacheTtlHours).toBe(168);
+  });
+
+  it('coerces autoBlockEnabled to a boolean and defaults off', () => {
+    expect(
+      sanitizeSettings({
+        apiKey: 'sk',
+        tags: [{ id: 'spam', description: 'x' }],
+        blockTags: ['spam'],
+        autoBlockEnabled: false,
+        cacheTtlHours: 24,
+      }).autoBlockEnabled,
+    ).toBe(false);
   });
 });

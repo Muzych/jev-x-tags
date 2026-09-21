@@ -140,6 +140,20 @@ export function reclaimStale(
   return next;
 }
 
+/**
+ * Content-script drain entry. When auto-block is off, leave pending jobs
+ * untouched (do not claim / mark blocking) so they do not auto-drain.
+ */
+export function claimJobsForDrain(
+  blocks: Record<string, BlockRecord>,
+  autoBlockEnabled: boolean,
+  now = Date.now(),
+  limit = CLAIM_BATCH,
+): { blocks: Record<string, BlockRecord>; claimed: BlockRecord[] } {
+  if (!autoBlockEnabled) return { blocks, claimed: [] };
+  return claimJobs(blocks, now, limit);
+}
+
 export function claimJobs(
   blocks: Record<string, BlockRecord>,
   now = Date.now(),

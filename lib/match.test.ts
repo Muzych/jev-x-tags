@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldBlockByTag } from './match';
+import { shouldBlockByTag, shouldEnqueueBlock } from './match';
 
 describe('shouldBlockByTag', () => {
   it('matches only when the assigned tag is in the block set', () => {
@@ -15,5 +15,17 @@ describe('shouldBlockByTag', () => {
 
   it('does not block from noul — only from the tag set', () => {
     expect(shouldBlockByTag('personal', ['spam'])).toBe(false);
+  });
+});
+
+describe('shouldEnqueueBlock', () => {
+  it('skips enqueue when auto-block is off even if the tag matches', () => {
+    expect(shouldEnqueueBlock('spam', ['spam', 'crypto'], false)).toBe(false);
+    expect(shouldEnqueueBlock('spam', ['spam', 'crypto'], true)).toBe(true);
+  });
+
+  it('still requires a matching tag when auto-block is on', () => {
+    expect(shouldEnqueueBlock('tech', ['spam'], true)).toBe(false);
+    expect(shouldEnqueueBlock(undefined, ['spam'], true)).toBe(false);
   });
 });

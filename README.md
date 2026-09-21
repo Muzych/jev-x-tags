@@ -13,7 +13,8 @@ Tag X/Twitter **accounts** with TypeSafe Jev (name / bio / comments), then **bat
 - 在 `https://x.com` / `https://twitter.com` 观察时间线帖子，以及打开的个人主页
 - 从 DOM 读取作者 **显示名、handle、简介（如有）、最近可见评论/帖子文本**，送给 Jev
 - 帖子进入视口后再打标（IntersectionObserver + debounce）；后台 service worker 串行调用 Jev
-- `primary_tag.choice` 作为账号标签；你勾选的 **auto-block tags** 决定是否入队拉黑
+- `primary_tag.choice` 作为账号标签；你勾选的 **auto-block tags** 决定哪些账号算命中
+- **自动拉黑 / Auto-block** 总开关默认 **关闭**。关闭时仍打标、仍显示 would block，但不会入队或调用拉黑 API
 - `should_hide_candidate`（noul）只作为 UI 建议，**不单独拉黑**
 - 按 handle 缓存到 `chrome.storage.local`，带 TTL
 - 匹配标签的账号进入拉黑队列（pending → blocked / failed），弹窗/选项页显示进度
@@ -38,9 +39,10 @@ pnpm dev
 2. 打开 **开发者模式 Developer mode**
 3. **加载已解压的扩展 Load unpacked**，选仓库里的 `.output/chrome-mv3`
 4. 点工具栏图标，粘贴 TypeSafe API key（[console.typesafe.ai](https://console.typesafe.ai)），保存
-5. 按需编辑标签词表、勾选要 **自动拉黑** 的标签（默认：`spam` / `promo` / `crypto`）
-6. 打开 x.com 并滚动。作者旁会出现标签；匹配账号会入队，由当前登录会话执行平台拉黑
-7. 需要一次性处理缓存里所有匹配账号时，点 **立即拉黑所有匹配账号**（须打开 x.com 才能真正发出请求）
+5. 按需编辑标签词表、勾选要匹配的 **auto-block tags**（默认：`spam` / `promo` / `crypto`）
+6. 打开 x.com 并滚动。作者旁会出现标签；命中规则的账号显示 **would block**，默认**不会**拉黑
+7. 确认词表无误后再打开 **启用自动拉黑 Enable auto-block** 并保存。之后匹配账号会入队，由当前登录会话执行平台拉黑
+8. 需要一次性处理缓存里所有匹配账号时，点 **立即拉黑所有匹配账号**（须打开自动拉黑，且打开 x.com 才能真正发出请求）
 
 生产构建：
 
@@ -53,12 +55,13 @@ pnpm build
 ## 选项页 Options
 
 - **API Key**：Bearer token，仅本地存储
-- **Auto-block tags**：与作者标签求交则 **拉黑该账号**
+- **自动拉黑 / Auto-block**（`autoBlockEnabled`，默认 `false`）：总开关。关闭时打标照常；打开后才入队并执行平台拉黑
+- **Auto-block tags**：与作者标签求交则算命中；开关打开时才会 **拉黑该账号**
 - **Tag list**：每项的 description 会作为 Jev Choice `criteria`；`other` 在请求里固定为 `null`
-- **拉黑队列**：pending / blocked / failed；已确认的 handle 不会重试
+- **拉黑队列**：pending / blocked / failed；已确认的 handle 不会重试。开关关闭时已排队任务会**暂停保留**，不会自动排空或取消
 - **TTL**：默认 168 小时
 - **清空打标缓存**：丢掉 handle → tag 缓存和日志（**保留**已确认拉黑记录）
-- **立即拉黑所有匹配账号**：扫描缓存中标签命中的账号并入队（含失败重试）
+- **立即拉黑所有匹配账号**：扫描缓存中标签命中的账号并入队（含失败重试）；自动拉黑关闭时按钮不可用
 - **日志**：最近打标结果、缓存命中、入队/拉黑结果、错误
 
 完整选项页：右键扩展图标 → 选项，或弹窗里的「打开完整选项」。
@@ -73,7 +76,11 @@ pnpm build
 后台 Service worker
   读 chrome.storage.local 缓存
   未命中则 POST https://api.typesafe.ai/v1/systemone
-  标签命中 auto-block → 写入拉黑队列（不重复已确认 handle）
+  标签命中 auto-block tags
+        │
+        ├─ autoBlockEnabled=false → 只打标 / 显示 would block（不入队）
+        └─ autoBlockEnabled=true  → 写入拉黑队列（不重复已确认 handle）
+                                    已有 pending 任务保持原状，打开开关后再排空
         │
         ▼
 内容脚本用当前 X 会话 POST /i/api/1.1/blocks/create.json
@@ -120,7 +127,29 @@ pnpm compile
 pnpm build
 ```
 
-单测覆盖：DOM 抽取（含 user id / 主页 bio / 评论拼接）、Jev 请求/响应、缓存 TTL、按标签入队、拉黑请求构造与 fail-open 判定、设置里 `hideTags → blockTags` 迁移。没有连真实 TypeSafe 或 X 账号的 e2e。
+单测覆盖：DOM 抽取（含 user id / 主页 bio / 评论拼接）、Jev 请求/响应、缓存 TTL、按标签入队、`autoBlockEnabled` 默认关闭且关闭时不入队/不 claim 队列、拉黑请求构造与 fail-open 判定、设置里 `hideTags → blockTags` 迁移。没有连真实 TypeSafe 或 X 账号的 e2e。
+
+## CI 与发版 Release
+
+GitHub Actions（`.github/workflows/ci.yml`）在 push 到 `main`、`v*` 标签和 PR 上会：
+
+1. 用 **pnpm 11** + Node 20 安装依赖（`pnpm-workspace.yaml` 已允许 `esbuild` 构建脚本）
+2. `pnpm test`、`pnpm compile`
+3. `pnpm zip` 打包 Chrome MV3，上传 `jev-x-tags-chrome-mv3.zip`
+
+**不会**在 CI 里使用 TypeSafe API key。
+
+推荐发版方式（打 tag）：
+
+```bash
+# 先改 package.json 的 version，提交到 main，然后：
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+推送 `v*` 标签后，workflow 会用 `GITHUB_TOKEN` 创建 GitHub Release，并附上 `jev-x-tags-chrome-mv3.zip`。
+
+另一种触发：把 `package.json` 的 `version` 提高后推进 `main`（与上一提交不同），也会创建 `v{version}` Release。日常开发推 main 且版本未变时，只跑测试和产物，不发 Release。
 
 ## 预览选项 UI Preview
 

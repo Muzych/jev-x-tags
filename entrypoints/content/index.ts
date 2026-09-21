@@ -6,10 +6,12 @@ import {
   mergeRecentText,
   viewerHandle,
 } from '@/lib/extract';
+import { shouldBlockByTag } from '@/lib/match';
 import { claimBlockJobs, reportBlock, tagAccount } from '@/lib/messaging';
+import { normalizeSettings } from '@/lib/settings';
 import { blocksItem, settingsItem } from '@/lib/storage';
 import { blockOnPage } from '@/lib/xblock-page';
-import type { AccountState, BlockRecord, TagResult } from '@/lib/types';
+import type { AccountState, BlockRecord, Settings, TagResult } from '@/lib/types';
 import './style.css';
 
 export default defineContentScript({
@@ -26,6 +28,8 @@ export default defineContentScript({
     let bannerShown = false;
     let draining = false;
     let selfHandle: string | null = null;
+    let autoBlockEnabled = false;
+    let blockTags: string[] = [];
 
     const io = new IntersectionObserver(
       (entries) => {
@@ -38,6 +42,12 @@ export default defineContentScript({
       },
       { root: null, rootMargin: '120px 0px', threshold: 0.05 },
     );
+
+    function applySettings(raw: Settings | null | undefined): void {
+      const settings = normalizeSettings(raw);
+      autoBlockEnabled = settings.autoBlockEnabled;
+      blockTags = settings.blockTags;
+    }
 
     function blockStatus(handle: string): BlockRecord | undefined {
       return blockByHandle.get(handle);
@@ -60,6 +70,7 @@ export default defineContentScript({
         userName.append(badge);
       }
       badge.dataset.jevTag = result.tag;
+      const wouldBlock = shouldBlockByTag(result.tag, blockTags);
       const suffix =
         record?.status === 'blocked'
           ? ' · blocked'
@@ -67,13 +78,17 @@ export default defineContentScript({
             ? ' · block failed'
             : pending
               ? ' · blocking…'
-              : '';
+              : wouldBlock && !autoBlockEnabled
+                ? ' · would block'
+                : '';
       badge.textContent = `${result.tag}${suffix}`;
       badge.title = record?.error
         ? `Jev ${result.tag}: ${record.error}`
-        : result.cached
-          ? `Jev tag (cached): ${result.tag}`
-          : `Jev tag: ${result.tag}`;
+        : wouldBlock && !autoBlockEnabled
+          ? `Jev ${result.tag}: matches auto-block tags (auto-block is off)`
+          : result.cached
+            ? `Jev tag (cached): ${result.tag}`
+            : `Jev tag: ${result.tag}`;
     }
 
     function repaintAll(): void {
@@ -154,7 +169,9 @@ export default defineContentScript({
           const meta = articleMeta.get(other);
           if (meta?.handle === state.handle) paint(other, res.result);
         }
-        if (res.shouldBlock && !res.alreadyBlocked) void drainQueue();
+        if (autoBlockEnabled && res.shouldBlock && !res.alreadyBlocked) {
+          void drainQueue();
+        }
       } catch {
         // fail-open: leave the user visible
       } finally {
@@ -163,13 +180,14 @@ export default defineContentScript({
     }
 
     async function drainQueue(): Promise<void> {
-      if (draining) return;
+      if (!autoBlockEnabled || draining) return;
       draining = true;
       try {
-        while (true) {
+        while (autoBlockEnabled) {
           const res = await claimBlockJobs();
           if (!res.ok || !res.jobs.length) break;
           for (const job of res.jobs) {
+            if (!autoBlockEnabled) break;
             blockByHandle.set(job.handle, job);
             repaintAll();
             if (selfHandle && job.handle === selfHandle) {
@@ -211,10 +229,11 @@ export default defineContentScript({
     }
 
     async function boot(): Promise<void> {
+      applySettings(await settingsItem.getValue());
       const stored = (await blocksItem.getValue()) ?? {};
       blockByHandle = new Map(Object.entries(stored));
       observeFeed();
-      void drainQueue();
+      if (autoBlockEnabled) void drainQueue();
     }
 
     const mo = new MutationObserver(() => observeFeed());
@@ -223,11 +242,14 @@ export default defineContentScript({
     ctx.addEventListener(window, 'wxt:locationchange', () => {
       bannerShown = false;
       observeFeed();
-      void drainQueue();
+      if (autoBlockEnabled) void drainQueue();
     });
 
-    const unwatchSettings = settingsItem.watch(() => {
+    const unwatchSettings = settingsItem.watch((next) => {
+      const wasEnabled = autoBlockEnabled;
+      applySettings(next);
       repaintAll();
+      if (autoBlockEnabled && !wasEnabled) void drainQueue();
     });
 
     const unwatchBlocks = blocksItem.watch((next) => {
@@ -236,7 +258,7 @@ export default defineContentScript({
       const hasPending = Object.values(next ?? {}).some(
         (r) => r.status === 'pending',
       );
-      if (hasPending) void drainQueue();
+      if (hasPending && autoBlockEnabled) void drainQueue();
     });
 
     ctx.onInvalidated(() => {

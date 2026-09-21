@@ -45,6 +45,9 @@ export function SettingsPanel({
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [tags, setTags] = useState<TagDefinition[]>(settings.tags);
   const [blockTags, setBlockTags] = useState<string[]>(settings.blockTags);
+  const [autoBlockEnabled, setAutoBlockEnabled] = useState(
+    settings.autoBlockEnabled,
+  );
   const [ttl, setTtl] = useState(String(settings.cacheTtlHours));
   const compact = variant === 'popup';
 
@@ -66,6 +69,7 @@ export function SettingsPanel({
       apiKey,
       tags,
       blockTags,
+      autoBlockEnabled,
       cacheTtlHours: Number(ttl) || DEFAULT_SETTINGS.cacheTtlHours,
     });
   }
@@ -115,12 +119,26 @@ export function SettingsPanel({
       </section>
 
       <section className="jev-card">
-        <h2>自动拉黑标签 Auto-block tags</h2>
+        <h2>自动拉黑 / Auto-block</h2>
+        <label className="jev-switch">
+          <input
+            type="checkbox"
+            checked={autoBlockEnabled}
+            onChange={(e) => setAutoBlockEnabled(e.target.checked)}
+          />
+          <span>
+            <strong>启用自动拉黑 Enable auto-block</strong>
+            <span className="jev-help">
+              关闭时仍会打标签，并标出命中规则的账号，但不会入队、不会调用拉黑
+              API、也不会走 UI 拉黑。已排队任务会暂停保留，直到重新打开（不会取消）。
+            </span>
+          </span>
+        </label>
         <p className="jev-help">
-          作者的 <code>primary_tag.choice</code> 落在这些标签上时，扩展会把该{' '}
-          <strong>账号</strong>加入拉黑队列，用你已登录的 X 会话执行平台拉黑。
+          作者的 <code>primary_tag.choice</code> 落在勾选的标签上时算命中。开关打开后才会入队拉黑；关闭时只打标并显示 would block。
           不会再用 CSS 藏帖。Jev 的 noul 只作为建议，不单独拉黑。
         </p>
+        <p className="jev-label">自动拉黑标签 Auto-block tags</p>
         <div className="jev-chips">
           {tags.map((tag) => (
             <label key={tag.id} className="jev-chip">
@@ -195,8 +213,9 @@ export function SettingsPanel({
           <span className="jev-count failed">失败 {blockCounts.failed}</span>
         </div>
         <p className="jev-help">
-          使用当前 x.com 登录会话执行。待处理任务需要打开 X 时间线。
+          使用当前 x.com 登录会话执行。待处理任务需要打开 X 时间线，且须打开自动拉黑。
           失败会保持账号可见并记入日志，不会假装成功。已确认拉黑的 handle 不会重试。
+          开关关闭时已排队任务会暂停，不会自动排空。
         </p>
         {blocks.length === 0 ? (
           <p className="jev-empty">队列是空的。打标匹配后会出现待拉黑账号。</p>
@@ -252,7 +271,12 @@ export function SettingsPanel({
           <button
             type="button"
             className="jev-btn"
-            disabled={busy}
+            disabled={busy || !autoBlockEnabled}
+            title={
+              autoBlockEnabled
+                ? undefined
+                : '打开自动拉黑后再入队 / Turn on auto-block to enqueue'
+            }
             onClick={() => void onBlockMatching()}
           >
             立即拉黑所有匹配账号

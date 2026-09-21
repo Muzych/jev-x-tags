@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyBlockReport,
   claimJobs,
+  claimJobsForDrain,
   enqueueBlock,
   isConfirmedBlock,
   listMatchingHandles,
@@ -110,6 +111,32 @@ describe('claimJobs', () => {
     );
     expect(claimed).toHaveLength(1);
     expect(claimed[0]?.handle).toBe('alice');
+  });
+});
+
+describe('claimJobsForDrain', () => {
+  it('does not claim or mutate pending jobs when auto-block is off', () => {
+    const pending = rec({});
+    const { claimed, blocks } = claimJobsForDrain(
+      { alice: pending },
+      false,
+      now,
+      1,
+    );
+    expect(claimed).toEqual([]);
+    expect(blocks.alice).toEqual(pending);
+    expect(blocks.alice?.status).toBe('pending');
+  });
+
+  it('claims pending jobs when auto-block is on', () => {
+    const { claimed, blocks } = claimJobsForDrain(
+      { alice: rec({}) },
+      true,
+      now,
+      1,
+    );
+    expect(claimed).toHaveLength(1);
+    expect(blocks.alice?.status).toBe('blocking');
   });
 });
 

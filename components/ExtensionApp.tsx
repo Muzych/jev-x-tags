@@ -53,7 +53,7 @@ export function ExtensionApp({ variant }: { variant: 'popup' | 'options' }) {
 
   return (
     <SettingsPanel
-      key={`${settings.apiKey}:${settings.tags.length}:${cacheSize}:${blockCounts.pending}`}
+      key={`${settings.apiKey}:${settings.tags.length}:${settings.autoBlockEnabled}:${cacheSize}:${blockCounts.pending}`}
       variant={variant}
       settings={settings}
       log={log}
