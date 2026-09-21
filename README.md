@@ -13,6 +13,7 @@ Tag X/Twitter **accounts** with TypeSafe Jev (name / bio / comments), then **bat
 - 在 `https://x.com` / `https://twitter.com` 观察时间线帖子，以及打开的个人主页
 - 从 DOM 读取作者 **显示名、handle、简介（如有）、最近可见评论/帖子文本**，送给 Jev
 - 帖子进入视口后再打标（IntersectionObserver + debounce）；后台 service worker 串行调用 Jev
+- 打标结果以高对比徽章显示在 **@handle / 显示名旁边**（时间线帖子 + 个人主页）。**不依赖**自动拉黑开关
 - `primary_tag.choice` 作为账号标签；你勾选的 **auto-block tags** 决定哪些账号算命中
 - **自动拉黑 / Auto-block** 总开关默认 **关闭**。关闭时仍打标、仍显示 would block，但不会入队或调用拉黑 API
 - 标签词表与 auto-block tags **出厂为空**，不带示例词；自己添加后再勾选
@@ -41,7 +42,7 @@ pnpm dev
 3. **加载已解压的扩展 Load unpacked**，选仓库里的 `.output/chrome-mv3`
 4. 点工具栏图标，粘贴 TypeSafe API key（[console.typesafe.ai](https://console.typesafe.ai)），保存
 5. 自己添加标签词表（出厂为空，不带示例），再勾选要匹配的 **auto-block tags**
-6. 打开 x.com 并滚动。作者旁会出现标签；命中规则的账号显示 **would block**，默认**不会**拉黑
+6. 打开 x.com 并滚动。作者 **@handle / 名字旁**会出现 Jev 标签徽章（自动拉黑关闭时也一样）；命中规则的徽章偏黄，tooltip 说明 auto-block off
 7. 确认词表无误后再打开 **启用自动拉黑 Enable auto-block** 并保存。之后匹配账号会入队，由当前登录会话执行平台拉黑
 8. 需要一次性处理缓存里所有匹配账号时，点 **立即拉黑所有匹配账号**（须打开自动拉黑，且打开 x.com 才能真正发出请求）
 
@@ -79,7 +80,7 @@ pnpm build
   未命中则 POST https://api.typesafe.ai/v1/systemone
   标签命中 auto-block tags
         │
-        ├─ autoBlockEnabled=false → 只打标 / 显示 would block（不入队）
+        ├─ autoBlockEnabled=false → 只打标，时间线/主页仍显示徽章（不入队）
         └─ autoBlockEnabled=true  → 写入拉黑队列（不重复已确认 handle）
                                     已有 pending 任务保持原状，打开开关后再排空
         │

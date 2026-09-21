@@ -4,6 +4,10 @@ import type { AccountState } from './types';
 
 const TWEET_SELECTOR = 'article[data-testid="tweet"]';
 
+/** Tweet author row, some layouts, and profile header. */
+export const NAME_HOST_SELECTOR =
+  '[data-testid="User-Name"], [data-testid="User-Names"], [data-testid="UserName"]';
+
 export function findTweetArticles(root: ParentNode = document): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(TWEET_SELECTOR)];
 }
@@ -27,7 +31,11 @@ function hrefPath(anchor: HTMLAnchorElement): string {
   }
 }
 
-function handleFromUserName(userName: Element): string | null {
+export function findNameHosts(root: ParentNode = document): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(NAME_HOST_SELECTOR)];
+}
+
+export function handleFromUserName(userName: Element): string | null {
   const at = [...userName.querySelectorAll('span')].find((span) =>
     span.textContent?.trim().startsWith('@'),
   );
@@ -145,9 +153,7 @@ export function mergeRecentText(existing: string, next: string): string {
 }
 
 export function extractAuthor(article: Element): AccountState | null {
-  const userName =
-    article.querySelector('[data-testid="User-Name"]') ??
-    article.querySelector('[data-testid="User-Names"]');
+  const userName = article.querySelector(NAME_HOST_SELECTOR);
 
   let handle: string | null = userName ? handleFromUserName(userName) : null;
 
@@ -188,9 +194,7 @@ export function extractProfileAccount(
   const handle = handleFromPath(pathname);
   if (!handle) return null;
 
-  const userName =
-    root.querySelector('[data-testid="UserName"]') ??
-    root.querySelector('[data-testid="User-Name"]');
+  const userName = root.querySelector(NAME_HOST_SELECTOR);
   const displayName = userName
     ? displayNameFromUserName(userName, handle)
     : handle;

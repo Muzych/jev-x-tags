@@ -1,3 +1,4 @@
+import { paintNameHosts } from '@/lib/badge';
 import { MIN_BLOCK_INTERVAL_MS, VIEWPORT_DEBOUNCE_MS } from '@/lib/defaults';
 import {
   extractAuthor,
@@ -6,7 +7,6 @@ import {
   mergeRecentText,
   viewerHandle,
 } from '@/lib/extract';
-import { shouldBlockByTag } from '@/lib/match';
 import { claimBlockJobs, reportBlock, tagAccount } from '@/lib/messaging';
 import { normalizeSettings } from '@/lib/settings';
 import { blocksItem, settingsItem } from '@/lib/storage';
@@ -53,52 +53,38 @@ export default defineContentScript({
       return blockByHandle.get(handle);
     }
 
-    function paint(article: HTMLElement, result: TagResult): void {
+    /** Badges are independent of auto-block — tagging-only mode still paints. */
+    function paintBadges(): void {
+      paintNameHosts(handleTags, {
+        blockTags,
+        autoBlockEnabled,
+        recordFor: blockStatus,
+      });
+    }
+
+    function paintArticleChrome(article: HTMLElement, result: TagResult): void {
       const record = blockStatus(result.handle);
       const pending =
-        record?.status === 'pending' || record?.status === 'blocking';
+        autoBlockEnabled &&
+        (record?.status === 'pending' || record?.status === 'blocking');
       article.classList.toggle('jev-block-pending', Boolean(pending));
       if (pending) article.setAttribute('data-jev-pending', '1');
       else article.removeAttribute('data-jev-pending');
+    }
 
-      const userName = article.querySelector('[data-testid="User-Name"]');
-      if (!userName) return;
-      let badge = article.querySelector<HTMLElement>('.jev-tag-badge');
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'jev-tag-badge';
-        userName.append(badge);
-      }
-      badge.dataset.jevTag = result.tag;
-      const wouldBlock = shouldBlockByTag(result.tag, blockTags);
-      const suffix =
-        record?.status === 'blocked'
-          ? ' · blocked'
-          : record?.status === 'failed'
-            ? ' · block failed'
-            : pending
-              ? ' · blocking…'
-              : wouldBlock && !autoBlockEnabled
-                ? ' · would block'
-                : '';
-      badge.textContent = `${result.tag}${suffix}`;
-      badge.title = record?.error
-        ? `Jev ${result.tag}: ${record.error}`
-        : wouldBlock && !autoBlockEnabled
-          ? `Jev ${result.tag}: matches auto-block tags (auto-block is off)`
-          : result.cached
-            ? `Jev tag (cached): ${result.tag}`
-            : `Jev tag: ${result.tag}`;
+    function paint(article: HTMLElement, result: TagResult): void {
+      paintArticleChrome(article, result);
+      paintBadges();
     }
 
     function repaintAll(): void {
       for (const article of findTweetArticles()) {
         const meta = articleMeta.get(article);
-        if (!meta) continue;
-        const result = handleTags.get(meta.handle);
-        if (result) paint(article, result);
+        const result = meta ? handleTags.get(meta.handle) : undefined;
+        if (result) paintArticleChrome(article, result);
         else article.classList.remove('jev-block-pending');
       }
+      paintBadges();
     }
 
     function showMissingKeyBanner(): void {
@@ -129,6 +115,7 @@ export default defineContentScript({
       const known = handleTags.get(next.handle);
       if (known) {
         if (article) paint(article, known);
+        else paintBadges();
         return;
       }
       if (queued.has(next.handle)) return;
@@ -165,9 +152,10 @@ export default defineContentScript({
           return;
         }
         handleTags.set(state.handle, res.result);
+        paintBadges();
         for (const other of findTweetArticles()) {
           const meta = articleMeta.get(other);
-          if (meta?.handle === state.handle) paint(other, res.result);
+          if (meta?.handle === state.handle) paintArticleChrome(other, res.result);
         }
         if (autoBlockEnabled && res.shouldBlock && !res.alreadyBlocked) {
           void drainQueue();
@@ -226,6 +214,7 @@ export default defineContentScript({
       }
       const profile = extractProfileAccount();
       if (profile) scheduleState(profile);
+      paintBadges();
     }
 
     async function boot(): Promise<void> {
