@@ -8,7 +8,7 @@ export function normalizeSettings(value?: StoredSettings | null): Settings {
   return {
     ...DEFAULT_SETTINGS,
     ...value,
-    tags: value?.tags?.length ? value.tags : DEFAULT_SETTINGS.tags,
+    tags: Array.isArray(value?.tags) ? value.tags : DEFAULT_SETTINGS.tags,
     blockTags: blockTags.map((t) => t.trim()).filter(Boolean),
     autoBlockEnabled: value?.autoBlockEnabled ?? DEFAULT_SETTINGS.autoBlockEnabled,
     cacheTtlHours: value?.cacheTtlHours ?? DEFAULT_SETTINGS.cacheTtlHours,

@@ -60,6 +60,10 @@ export function SettingsPanel({
     );
   }
 
+  function addTag() {
+    setTags((cur) => [...cur, { id: '', description: '' }]);
+  }
+
   function updateTag(index: number, patch: Partial<TagDefinition>) {
     setTags((cur) => cur.map((t, i) => (i === index ? { ...t, ...patch } : t)));
   }
@@ -139,38 +143,45 @@ export function SettingsPanel({
           不会再用 CSS 藏帖。Jev 的 noul 只作为建议，不单独拉黑。
         </p>
         <p className="jev-label">自动拉黑标签 Auto-block tags</p>
-        <div className="jev-chips">
-          {tags.map((tag) => (
-            <label key={tag.id} className="jev-chip">
-              <input
-                type="checkbox"
-                checked={blockSet.has(tag.id)}
-                onChange={() => toggleBlock(tag.id)}
-              />
-              <span>{tag.id}</span>
-            </label>
-          ))}
-        </div>
+        {tags.some((t) => t.id) ? (
+          <div className="jev-chips">
+            {tags
+              .filter((tag) => tag.id)
+              .map((tag) => (
+                <label key={tag.id} className="jev-chip">
+                  <input
+                    type="checkbox"
+                    checked={blockSet.has(tag.id)}
+                    onChange={() => toggleBlock(tag.id)}
+                  />
+                  <span>{tag.id}</span>
+                </label>
+              ))}
+          </div>
+        ) : (
+          <p className="jev-empty">
+            还没有标签。先在词表里添加你自己的 id，再勾选要自动拉黑的项。 / Add your own
+            tags first, then choose which ones auto-block.
+          </p>
+        )}
       </section>
 
-      {!compact && (
-        <section className="jev-card">
-          <div className="jev-row">
-            <h2>标签词表 / Jev Choice criteria</h2>
-            <button
-              type="button"
-              className="jev-btn ghost"
-              onClick={() =>
-                setTags((cur) => [...cur, { id: '', description: '' }])
-              }
-            >
-              添加标签
-            </button>
-          </div>
-          <p className="jev-help">
-            这些描述会作为 Jev <code>primary_tag.criteria</code>。
-            <code>other</code> 在请求里始终为 <code>null</code>。
+      <section className="jev-card">
+        <div className="jev-row">
+          <h2>标签词表 / Jev Choice criteria</h2>
+          <button type="button" className="jev-btn ghost" onClick={addTag}>
+            添加标签 Add tag
+          </button>
+        </div>
+        <p className="jev-help">
+          出厂为空。这些描述会作为 Jev <code>primary_tag.criteria</code>。
+          <code>other</code> 在请求里始终为 <code>null</code>。
+        </p>
+        {tags.length === 0 ? (
+          <p className="jev-empty">
+            词表是空的。点「添加标签」写 id 和判定说明。 / Empty — add your own tags.
           </p>
+        ) : (
           <div className="jev-tags">
             {tags.map((tag, index) => (
               <div className="jev-tag-row" key={`${tag.id}-${index}`}>
@@ -202,8 +213,8 @@ export function SettingsPanel({
               </div>
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       <section className="jev-card">
         <h2>拉黑队列 / Block queue</h2>

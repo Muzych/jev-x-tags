@@ -21,14 +21,6 @@
   user-select: none;
 }
 
-.jev-tag-badge[data-jev-tag='spam'],
-.jev-tag-badge[data-jev-tag='promo'],
-.jev-tag-badge[data-jev-tag='crypto'] {
-  color: #ffe8d6;
-  background: #3a2414;
-  border-color: #8a4b1f;
-}
-
 .jev-missing-key {
   position: sticky;
   top: 0;

@@ -1,62 +1,19 @@
 import type { Settings, TagDefinition } from './types';
 
-/** Default auto-block set: noisy / promotional buckets. User-editable. */
-export const DEFAULT_BLOCK_TAGS = ['spam', 'promo', 'crypto'] as const;
+/** Shipped empty: users add their own auto-block set. */
+export const DEFAULT_BLOCK_TAGS: readonly string[] = [];
 
 /** @deprecated Use DEFAULT_BLOCK_TAGS. Kept so old comments/docs still grep. */
 export const DEFAULT_HIDE_TAGS = DEFAULT_BLOCK_TAGS;
 
-export const DEFAULT_TAGS: TagDefinition[] = [
-  {
-    id: 'spam',
-    description:
-      'Scam, bot, fake giveaway, follow-for-follow, or low-quality engagement bait.',
-  },
-  {
-    id: 'promo',
-    description:
-      'Mostly advertising a product, service, affiliate link, or self-promotion.',
-  },
-  {
-    id: 'crypto',
-    description:
-      'Token shills, NFT pumps, trading signals, or crypto-promotional accounts.',
-  },
-  {
-    id: 'politics',
-    description:
-      'Political commentary, activism, elections, or partisan talking points.',
-  },
-  {
-    id: 'news',
-    description:
-      'Journalists, outlets, or accounts that mainly share current events.',
-  },
-  {
-    id: 'tech',
-    description:
-      'Software, AI, hardware, startups, or engineering discussion.',
-  },
-  {
-    id: 'personal',
-    description:
-      'Personal life, friends, diary-style posts — not topical media.',
-  },
-  {
-    id: 'meme',
-    description: 'Memes, jokes, shitposts, or humor-first accounts.',
-  },
-  {
-    id: 'other',
-    description: 'Does not fit a more specific tag.',
-  },
-];
+/** Shipped empty: users add their own Jev choice ids. */
+export const DEFAULT_TAGS: TagDefinition[] = [];
 
 export const DEFAULT_TTL_HOURS = 168;
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
-  tags: DEFAULT_TAGS,
+  tags: [...DEFAULT_TAGS],
   blockTags: [...DEFAULT_BLOCK_TAGS],
   autoBlockEnabled: false,
   cacheTtlHours: DEFAULT_TTL_HOURS,

@@ -15,6 +15,7 @@ Tag X/Twitter **accounts** with TypeSafe Jev (name / bio / comments), then **bat
 - 帖子进入视口后再打标（IntersectionObserver + debounce）；后台 service worker 串行调用 Jev
 - `primary_tag.choice` 作为账号标签；你勾选的 **auto-block tags** 决定哪些账号算命中
 - **自动拉黑 / Auto-block** 总开关默认 **关闭**。关闭时仍打标、仍显示 would block，但不会入队或调用拉黑 API
+- 标签词表与 auto-block tags **出厂为空**，不带示例词；自己添加后再勾选
 - `should_hide_candidate`（noul）只作为 UI 建议，**不单独拉黑**
 - 按 handle 缓存到 `chrome.storage.local`，带 TTL
 - 匹配标签的账号进入拉黑队列（pending → blocked / failed），弹窗/选项页显示进度
@@ -39,7 +40,7 @@ pnpm dev
 2. 打开 **开发者模式 Developer mode**
 3. **加载已解压的扩展 Load unpacked**，选仓库里的 `.output/chrome-mv3`
 4. 点工具栏图标，粘贴 TypeSafe API key（[console.typesafe.ai](https://console.typesafe.ai)），保存
-5. 按需编辑标签词表、勾选要匹配的 **auto-block tags**（默认：`spam` / `promo` / `crypto`）
+5. 自己添加标签词表（出厂为空，不带示例），再勾选要匹配的 **auto-block tags**
 6. 打开 x.com 并滚动。作者旁会出现标签；命中规则的账号显示 **would block**，默认**不会**拉黑
 7. 确认词表无误后再打开 **启用自动拉黑 Enable auto-block** 并保存。之后匹配账号会入队，由当前登录会话执行平台拉黑
 8. 需要一次性处理缓存里所有匹配账号时，点 **立即拉黑所有匹配账号**（须打开自动拉黑，且打开 x.com 才能真正发出请求）
@@ -56,8 +57,8 @@ pnpm build
 
 - **API Key**：Bearer token，仅本地存储
 - **自动拉黑 / Auto-block**（`autoBlockEnabled`，默认 `false`）：总开关。关闭时打标照常；打开后才入队并执行平台拉黑
-- **Auto-block tags**：与作者标签求交则算命中；开关打开时才会 **拉黑该账号**
-- **Tag list**：每项的 description 会作为 Jev Choice `criteria`；`other` 在请求里固定为 `null`
+- **Auto-block tags**：与作者标签求交则算命中；开关打开时才会 **拉黑该账号**。出厂为空，自己勾选
+- **Tag list**：出厂为空。每项的 description 会作为 Jev Choice `criteria`；`other` 在请求里固定为 `null`
 - **拉黑队列**：pending / blocked / failed；已确认的 handle 不会重试。开关关闭时已排队任务会**暂停保留**，不会自动排空或取消
 - **TTL**：默认 168 小时
 - **清空打标缓存**：丢掉 handle → tag 缓存和日志（**保留**已确认拉黑记录）
@@ -98,7 +99,7 @@ Jev 请求体（字段固定）：
     "primary_tag": {
       "type": "choice",
       "instructions": "Pick the best tag for this X/Twitter account based on the state (display name, handle, bio, and recent comments/posts).",
-      "criteria": { "spam": "...", "other": null }
+      "criteria": { "your_tag": "...", "other": null }
     },
     "should_hide_candidate": {
       "type": "noul",

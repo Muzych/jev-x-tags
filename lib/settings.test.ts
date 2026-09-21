@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_BLOCK_TAGS } from './defaults';
+import { DEFAULT_SETTINGS } from './defaults';
 import { normalizeSettings, sanitizeSettings } from './settings';
 
 describe('normalizeSettings', () => {
@@ -20,8 +20,26 @@ describe('normalizeSettings', () => {
     expect(settings.blockTags).toEqual(['promo']);
   });
 
-  it('falls back to default block tags', () => {
-    expect(normalizeSettings(null).blockTags).toEqual([...DEFAULT_BLOCK_TAGS]);
+  it('ships empty tags and blockTags', () => {
+    const settings = normalizeSettings(null);
+    expect(settings.tags).toEqual([]);
+    expect(settings.blockTags).toEqual([]);
+    expect(DEFAULT_SETTINGS.tags).toEqual([]);
+    expect(DEFAULT_SETTINGS.blockTags).toEqual([]);
+  });
+
+  it('keeps previously stored tag lists (does not wipe old installs)', () => {
+    const settings = normalizeSettings({
+      tags: [{ id: 'spam', description: 'old' }],
+      blockTags: ['spam'],
+    });
+    expect(settings.tags).toEqual([{ id: 'spam', description: 'old' }]);
+    expect(settings.blockTags).toEqual(['spam']);
+  });
+
+  it('keeps an explicitly empty tag list empty', () => {
+    expect(normalizeSettings({ tags: [], blockTags: [] }).tags).toEqual([]);
+    expect(normalizeSettings({ tags: [], blockTags: [] }).blockTags).toEqual([]);
   });
 
   it('defaults autoBlockEnabled to false', () => {
