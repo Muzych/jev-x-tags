@@ -26,7 +26,7 @@ Tag X/Twitter **accounts** with TypeSafe Jev (name / bio / comments), then **bat
 
 ## 安装与开发 Install
 
-需要 Node 20+ 和 [pnpm](https://pnpm.io)。
+需要 Node 22+ 和 [pnpm](https://pnpm.io)（CI 使用 pnpm 11；pnpm 11 需要 Node ≥ 22.13）。
 
 ```bash
 pnpm install
@@ -133,7 +133,7 @@ pnpm build
 
 GitHub Actions（`.github/workflows/ci.yml`）在 push 到 `main`、`v*` 标签和 PR 上会：
 
-1. 用 **pnpm 11** + Node 20 安装依赖（`pnpm-workspace.yaml` 已允许 `esbuild` 构建脚本）
+1. 用 **pnpm 11** + Node 22 安装依赖（`pnpm-workspace.yaml` 已允许 `esbuild` 构建脚本）
 2. `pnpm test`、`pnpm compile`
 3. `pnpm zip` 打包 Chrome MV3，上传 `jev-x-tags-chrome-mv3.zip`
 
