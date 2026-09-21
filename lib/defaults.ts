@@ -39,6 +39,8 @@ export const BLOCK_STORE_LIMIT = 240;
 export const MIN_JEV_INTERVAL_MS = 220;
 export const MIN_BLOCK_INTERVAL_MS = 900;
 export const VIEWPORT_DEBOUNCE_MS = 160;
+/** Coalesce X timeline MutationObserver scans (not Jev). */
+export const FEED_SCAN_MS = 280;
 export const MAX_RECENT_TEXT = 480;
 export const MAX_BIO = 280;
 export const STALE_BLOCKING_MS = 45_000;

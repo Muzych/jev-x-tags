@@ -72,7 +72,8 @@ pnpm build
 
 ```
 内容脚本 Content script (x.com)
-  MutationObserver + IntersectionObserver
+  MutationObserver（约 280ms 合并，已跟踪的 article 不再 observe/抽取）
+  + IntersectionObserver（进视口才打标，仍 debounce）
         │  chrome.runtime.sendMessage({ type: "TAG_ACCOUNT" })
         ▼
 后台 Service worker

@@ -104,6 +104,24 @@ describe('attachTagBadge', () => {
     expect(root.querySelectorAll('.jev-tag-badge')).toHaveLength(1);
     expect(host.nextElementSibling?.textContent).toBe('tech');
   });
+
+  it('does not rebuild the node when the tag is unchanged', () => {
+    const root = mount(
+      '<div data-testid="User-Name"><a href="/alice_dev">@alice_dev</a></div>',
+    );
+    const host = root.querySelector<HTMLElement>('[data-testid="User-Name"]')!;
+    const model = {
+      handle: 'alice_dev',
+      tag: 'news',
+      title: 'Jev: news',
+      wouldBlock: false,
+    };
+    const first = attachTagBadge(host, model);
+    const text = first.firstChild;
+    const second = attachTagBadge(host, model);
+    expect(second).toBe(first);
+    expect(second.firstChild).toBe(text);
+  });
 });
 
 describe('paintNameHosts', () => {

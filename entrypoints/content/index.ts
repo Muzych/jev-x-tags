@@ -1,5 +1,10 @@
 import { paintNameHosts } from '@/lib/badge';
-import { MIN_BLOCK_INTERVAL_MS, VIEWPORT_DEBOUNCE_MS } from '@/lib/defaults';
+import { createCoalescer } from '@/lib/coalesce';
+import {
+  FEED_SCAN_MS,
+  MIN_BLOCK_INTERVAL_MS,
+  VIEWPORT_DEBOUNCE_MS,
+} from '@/lib/defaults';
 import {
   extractAuthor,
   extractProfileAccount,
@@ -24,6 +29,7 @@ export default defineContentScript({
     const recentByHandle = new Map<string, string>();
     const queued = new Set<string>();
     const timers = new Map<string, number>();
+    const observedArticles = new WeakSet<HTMLElement>();
     let blockByHandle = new Map<string, BlockRecord>();
     let bannerShown = false;
     let draining = false;
@@ -74,7 +80,12 @@ export default defineContentScript({
 
     function paint(article: HTMLElement, result: TagResult): void {
       paintArticleChrome(article, result);
-      paintBadges();
+      paintNameHosts(handleTags, {
+        blockTags,
+        autoBlockEnabled,
+        recordFor: blockStatus,
+        root: article,
+      });
     }
 
     function repaintAll(): void {
@@ -205,15 +216,19 @@ export default defineContentScript({
     function observeFeed(): void {
       selfHandle = viewerHandle() ?? selfHandle;
       for (const article of findTweetArticles()) {
+        if (observedArticles.has(article)) continue;
+        observedArticles.add(article);
         io.observe(article);
-        const state = extractAuthor(article);
-        if (!state) continue;
-        articleMeta.set(article, { handle: state.handle });
-        const known = handleTags.get(state.handle);
-        if (known) paint(article, known);
       }
       const profile = extractProfileAccount();
-      if (profile) scheduleState(profile);
+      if (
+        profile &&
+        profile.handle !== selfHandle &&
+        !handleTags.has(profile.handle) &&
+        !queued.has(profile.handle)
+      ) {
+        scheduleState(profile);
+      }
       paintBadges();
     }
 
@@ -225,11 +240,14 @@ export default defineContentScript({
       if (autoBlockEnabled) void drainQueue();
     }
 
-    const mo = new MutationObserver(() => observeFeed());
+    const feedScan = createCoalescer(observeFeed, FEED_SCAN_MS);
+
+    const mo = new MutationObserver(() => feedScan.trigger());
     mo.observe(document.documentElement, { childList: true, subtree: true });
 
     ctx.addEventListener(window, 'wxt:locationchange', () => {
       bannerShown = false;
+      feedScan.cancel();
       observeFeed();
       if (autoBlockEnabled) void drainQueue();
     });
@@ -251,6 +269,7 @@ export default defineContentScript({
     });
 
     ctx.onInvalidated(() => {
+      feedScan.cancel();
       mo.disconnect();
       io.disconnect();
       unwatchSettings();

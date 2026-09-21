@@ -72,28 +72,48 @@ function existingBadge(host: HTMLElement): HTMLElement | null {
   return host.querySelector<HTMLElement>(`.${BADGE_CLASS}`);
 }
 
+export function badgeIsCurrent(
+  badge: HTMLElement,
+  host: HTMLElement,
+  model: BadgeModel,
+): boolean {
+  if (host.nextElementSibling !== badge) return false;
+  return (
+    badge.textContent === badgeCaption(model.tag) &&
+    badge.title === model.title &&
+    badge.dataset.jevTag === model.tag &&
+    badge.dataset.jevHandle === model.handle &&
+    (badge.dataset.jevWouldBlock === '1') === Boolean(model.wouldBlock) &&
+    (badge.dataset.jevStatus || undefined) === (model.status || undefined)
+  );
+}
+
 /**
  * Place the badge as a sibling of the name host so X's overflow:hidden
  * on inner handle rows cannot clip it. Visible with auto-block off.
+ * No-ops when the existing chip already matches (cheap on timeline scans).
  */
 export function attachTagBadge(host: HTMLElement, model: BadgeModel): HTMLElement {
   let badge = existingBadge(host);
+  if (badge && badgeIsCurrent(badge, host, model)) return badge;
+
   if (!badge) {
     badge = host.ownerDocument.createElement('span');
     badge.className = BADGE_CLASS;
   }
-  badge.textContent = badgeCaption(model.tag);
-  badge.title = model.title;
-  badge.dataset.jevTag = model.tag;
-  badge.dataset.jevHandle = model.handle;
+  const caption = badgeCaption(model.tag);
+  if (badge.textContent !== caption) badge.textContent = caption;
+  if (badge.title !== model.title) badge.title = model.title;
+  if (badge.dataset.jevTag !== model.tag) badge.dataset.jevTag = model.tag;
+  if (badge.dataset.jevHandle !== model.handle) {
+    badge.dataset.jevHandle = model.handle;
+  }
   if (model.wouldBlock) badge.dataset.jevWouldBlock = '1';
   else delete badge.dataset.jevWouldBlock;
   if (model.status) badge.dataset.jevStatus = model.status;
   else delete badge.dataset.jevStatus;
 
-  if (badge.parentElement !== host.parentElement || host.nextElementSibling !== badge) {
-    host.after(badge);
-  }
+  if (host.nextElementSibling !== badge) host.after(badge);
   return badge;
 }
 
